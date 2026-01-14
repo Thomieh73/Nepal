@@ -31,6 +31,7 @@ process DORADO_SIMPLEX {
 
 // This process does demultiplexing with dorado demux.
 // It takes a samplesheet and the information for the kit that was used.
+// it also does trimming of the barcode. 
 
 process DORADO_DEMUX {
 	conda "/cluster/projects/nn9305k/src/miniconda/envs/dorado_gpu_1.3.0"
@@ -38,18 +39,20 @@ process DORADO_DEMUX {
 	//publishDir "${params.out_dir}/dorado_demux/", pattern: "demultiplexed/*", mode: "copy"
 	//publishDir "${params.out_dir}/01_guppy/", pattern: "fastq", mode: "copy"
 	//publishDir "${params.out_dir}/01_dorado_simplex/", pattern: "sequencing_logs/sequencing_*.*", mode: "copy"
+	publishDir "${params.out_dir}/data_overview/", pattern: "demultiplexed/barcoding_summary.txt", mode: "copy"
 
-	label 'gpu_A100'
+	label 'heavy'
 
 	input:
 	file(x)
 
 	output:
-	path "demultiplexed/*", emit: demux_ch
+	// Captures every BAM in the nested structure
+	path "demultiplexed/**/*.bam", emit: demux_ch
 
 	script:
 	"""
-	dorado demux --kit-name $params.dorado.barcode --sample-sheet $params.samplesheet.location --output-dir demultiplexed $x
+    dorado demux --kit-name $params.dorado.barcode --sample-sheet $params.samplesheet.location --emit-summary --output-dir demultiplexed $x
 
 	"""
 
@@ -89,4 +92,28 @@ process DORADO_DUPLEX {
 
 	"""
 
+}
+
+
+// the bellow process is to rename the bam files after the demuxing step.
+// by doing this we get bam files with the same sample name as the alias in the samplesheet.
+
+process MERGE_BAMS {
+    tag "$alias"
+
+    input:
+    tuple val(alias), path(chunks)
+
+    output:
+    path "${alias}.bam", emit: merged_bam
+
+    script:
+    if (chunks instanceof List && chunks.size() > 1)
+        """
+        samtools merge ${alias}.bam $chunks
+        """
+    else
+        """
+        mv $chunks ${alias}.bam
+        """
 }

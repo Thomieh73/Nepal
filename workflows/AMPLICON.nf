@@ -12,6 +12,7 @@
     include { SEQKIT_FLYE } from "../modules/SEQKIT.nf"
     include { EMU_COMBINE } from "../modules/EMU.nf"
     include { EMU_CLASS } from "../modules/EMU.nf"
+    include { MERGE_BAMS } from "../modules/DORADO.nf"
 
 
 // workflows
@@ -23,8 +24,22 @@ workflow AMPLICON {
     // process reads to get demultiplexed reads IDs
 	DORADO_SIMPLEX(pod5_ch)   
     DORADO_DEMUX(DORADO_SIMPLEX.out.simplex_ch.flatten())
-    // process reads to get duplex and simplex reads
-    SAMTOOLS_BAM2FQ(DORADO_DEMUX.out.demux_ch.flatten())
+    // 3. CHANNEL TRANSFORMATION: Grouping by the parent folder (the alias)
+    ch_grouped_bams = DORADO_DEMUX.out.demux_ch
+        .flatten()
+        .map { file -> 
+            def alias = file.parent.name 
+            return [ alias, file ] 
+        }
+        .filter { alias, file -> alias != 'unclassified' } // Optional: ignore unclassified
+        .groupTuple()
+
+    // 4. Merging chunks into sample-named BAMs (e.g., my_first_sample.bam)
+    MERGE_BAMS(ch_grouped_bams)
+
+    // 5. Convert to FastQ (now using the clean merged BAMs)
+    // We no longer need .flatten() here because MERGE_BAMS emits one file at a time
+    SAMTOOLS_BAM2FQ(MERGE_BAMS.out.merged_bam)
 
     // filtering the reads to remove poor reads
     NANOFILT_SIMPLEX(SAMTOOLS_BAM2FQ.out.filter_ch.flatten())
